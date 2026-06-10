@@ -1,0 +1,59 @@
+INTELLIHUNT — ML Model Validation Report
+==================================================
+
+Dataset: DDoS
+  Accuracy:  0.9998
+  Precision: 0.9999
+  Recall:    0.9998
+  F1-Score:  0.9999
+  ROC-AUC:   1.0000
+  Confusion Matrix: [[93241, 9], [25, 127989]]
+
+Dataset: PortScan
+  Accuracy:  0.9993
+  Precision: 0.9723
+  Recall:    0.9872
+  F1-Score:  0.9797
+  ROC-AUC:   0.9997
+  Confusion Matrix: [[117511, 55], [25, 1931]]
+
+Dataset: Botnet
+  Accuracy:  0.9992
+  Precision: 0.9872
+  Recall:    0.9123
+  F1-Score:  0.9483
+  ROC-AUC:   0.9985
+  Confusion Matrix: [[174584, 17], [126, 1311]]
+
+Dataset: WebAttack
+  Accuracy:  0.9997
+  Precision: 0.9888
+  Recall:    0.9879
+  F1-Score:  0.9883
+  ROC-AUC:   0.9998
+  Confusion Matrix: [[153653, 24], [26, 2117]]
+
+Dataset: Infiltration
+  Accuracy:  0.9992
+  Precision: 0.1774
+  Recall:    0.9167
+  F1-Score:  0.2973
+  ROC-AUC:   0.9857
+  Confusion Matrix: [[207441, 153], [3, 33]]
+
+Dataset: BruteForce
+  Accuracy:  0.9998
+  Precision: 0.9946
+  Recall:    0.9981
+  F1-Score:  0.9963
+  ROC-AUC:   1.0000
+  Confusion Matrix: [[380514, 50], [17, 9133]]
+
+Dataset: DoS
+  Accuracy:  0.9995
+  Precision: 0.9996
+  Recall:    0.9989
+  F1-Score:  0.9993
+  ROC-AUC:   1.0000
+  Confusion Matrix: [[391167, 68], [219, 193537]]
+

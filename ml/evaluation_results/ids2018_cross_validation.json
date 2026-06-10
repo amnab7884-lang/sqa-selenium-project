@@ -1,0 +1,18 @@
+{
+  "test": "CIC-IDS2018 Cross-Dataset Validation",
+  "trained_on": "CICIDS2017",
+  "tested_on": "CIC-IDS2018",
+  "total_samples": 1000,
+  "per_file": [
+    {
+      "file": "03-02-2018.csv",
+      "samples": 1000,
+      "rf_accuracy": 0.5,
+      "rf_precision": 0.0,
+      "rf_recall": 0.0,
+      "rf_f1": 0.0,
+      "iso_accuracy": 0.457,
+      "iso_recall": 0.0
+    }
+  ]
+}

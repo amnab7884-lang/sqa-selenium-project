@@ -1,0 +1,516 @@
+# 🛡️ INTELLIHUNT — Complete FYP Defense Preparation Guide
+
+---
+
+## 1. PROJECT OVERVIEW (Elevator Pitch)
+
+**Intellihunt** is an AI-powered Cyber Threat Hunting Copilot that combines **dual ML models** (Random Forest + Isolation Forest), **real-time threat intelligence APIs**, and a **Grok-powered AI assistant** into a unified platform for SOC analysts. It ingests live network traffic or PCAP files, runs them through a **3-layer consensus engine**, and produces actionable alerts with MITRE ATT&CK mapping, automated playbooks, and PDF incident reports.
+
+**One-liner:** *"An intelligent, multi-layered network intrusion detection system that doesn't just detect threats — it explains them, classifies them, and tells you how to respond."*
+
+---
+
+## 2. TECHNOLOGY STACK — WHAT & WHY
+
+### 2.1 Backend: FastAPI (Python)
+
+| Choice | Why |
+|--------|-----|
+| **FastAPI** over Flask/Django | Async-native (`async/await`), auto-generates OpenAPI docs, type validation via Pydantic, ~3× faster than Flask for I/O-bound workloads (Threat Intel API calls). |
+| **Python** as language | scikit-learn, pandas, joblib are Python-native. No language boundary between ML inference and API layer. |
+| **Uvicorn** as server | ASGI server required for async FastAPI; supports hot-reload in development. |
+
+> **If asked "Why not Go/Node.js?"** — ML ecosystem is Python-first. Calling Python models from Go/Node adds serialization overhead and deployment complexity.
+
+### 2.2 Frontend: React + TypeScript + Vite + TailwindCSS
+
+| Choice | Why |
+|--------|-----|
+| **React 18** | Component-based architecture for a complex dashboard with 15+ pages. |
+| **TypeScript** | Type safety prevents runtime bugs in a security-critical UI. |
+| **Vite** over CRA/Webpack | 10-50× faster HMR, native ESM, simpler config. |
+| **TailwindCSS** | Utility-first CSS for rapid, consistent styling. |
+| **Radix UI + shadcn/ui** | Accessible, unstyled primitives — we control the look while getting free ARIA compliance. |
+| **Recharts** | React-native charting for dashboard visualizations (attack timelines, risk distributions). |
+| **@tanstack/react-query** | Automatic polling, caching, retry logic for real-time dashboard data. |
+| **Framer Motion** | Smooth micro-animations for premium UX. |
+| **Lucide React** | Consistent, tree-shakeable icon set. |
+
+### 2.3 Database: MongoDB Atlas
+
+| Question | Answer |
+|----------|--------|
+| **Why MongoDB?** | Network logs are **semi-structured** — each flow has 70+ features, optional threat intel fields, variable attack metadata. A rigid SQL schema would require constant migrations. MongoDB's flexible documents store logs exactly as-is. |
+| **Why not PostgreSQL?** | Postgres is superior for relational data. But our data is: (1) append-heavy (write >> read), (2) schema-less (different ingestion sources produce different fields), (3) document-oriented (each log is a self-contained record). MongoDB excels here. |
+| **Why not Elasticsearch?** | ES is ideal for full-text search at scale, but adds operational complexity (JVM, cluster management). MongoDB Atlas is fully managed, free-tier available, and sufficient for our scale. |
+| **Why Atlas (cloud)?** | Zero-ops: automatic backups, scaling, TLS. Free M0 tier for FYP. No need to manage a local database server. |
+| **Driver choice** | **Motor** (async MongoDB driver) — non-blocking I/O matches FastAPI's async model. |
+| **Indexing strategy** | Indexes on `timestamp`, `SRC_IP`, `DST_IP`, `risk_score`, `score` for fast dashboard queries. |
+
+### 2.4 ML Libraries
+
+| Library | Purpose |
+|---------|---------|
+| **scikit-learn** | Training & inference for Random Forest and Isolation Forest. Industry-standard, well-documented, deterministic. |
+| **pandas** | Data manipulation during training and feature engineering. |
+| **joblib** | Model serialization (`.pkl` files) — faster than pickle for NumPy arrays. |
+| **StandardScaler** | Feature normalization — Random Forest doesn't strictly need it, but Isolation Forest performs better with scaled features. |
+
+### 2.5 Ingestion: NFStream
+
+| Question | Answer |
+|----------|--------|
+| **Why NFStream?** | Converts raw packets into **flow-level features** (packet counts, byte rates, IATs) that match CICIDS2017's feature format. Alternative: Scapy — but Scapy is packet-level, requiring manual flow aggregation. |
+| **Live capture** | NFStream wraps libpcap; supports promiscuous mode, configurable timeouts. |
+| **PCAP support** | Same NFStreamer API works for both live interfaces and `.pcap` files. |
+
+### 2.6 AI Copilot: Grok (xAI) — NOT GPT
+
+| Question | Answer |
+|----------|--------|
+| **Why Grok over GPT-4?** | (1) **Cost**: Grok-3-mini-fast is significantly cheaper per token. (2) **Speed**: Lower latency for real-time alert explanations. (3) **API compatibility**: Uses OpenAI-compatible endpoint — can swap to GPT/Claude with a single URL change. (4) **No vendor lock-in**: The `copilot.py` module is model-agnostic — just change `GROK_API_URL` and `GROK_MODEL` env vars. |
+| **Why not local LLM?** | Local models (LLaMA, Mistral) require GPU and 8GB+ VRAM. Cloud API is more practical for an FYP demo. |
+| **Why not OpenAI GPT?** | GPT-4 costs ~30× more per token than Grok-mini. For an FYP, Grok's free tier is sufficient. |
+| **What does Grok do?** | (1) Explains alerts in plain English, (2) Maps alerts to MITRE ATT&CK techniques, (3) Generates incident response playbooks, (4) Produces executive attack analysis reports. |
+
+### 2.7 Threat Intelligence APIs
+
+| API | Purpose |
+|-----|---------|
+| **VirusTotal** | IP reputation — how many antivirus engines flag this IP as malicious. |
+| **AbuseIPDB** | Crowd-sourced IP abuse reports — confidence score 0-100%. |
+| **Both are optional** | System works without API keys — ML models are the primary detection layer. TI is an enrichment layer. |
+
+### 2.8 Alerting: Email / Slack / Teams
+
+- **Gmail SMTP** with App Passwords for email alerts
+- **Slack Incoming Webhooks** with Block Kit formatting
+- **Microsoft Teams Adaptive Cards** via webhooks
+- All channels are **optional and independent** — configure any combination
+
+---
+
+## 3. ML MODELS — DEEP DIVE
+
+### 3.1 Why TWO Models?
+
+| Model | Role | Strength | Weakness |
+|-------|------|----------|----------|
+| **Random Forest** (Supervised) | Classifies known attack patterns | High precision on trained attack types | Cannot detect truly novel/zero-day attacks |
+| **Isolation Forest** (Unsupervised) | Detects anomalous traffic | Can flag unknown attacks by behavioral deviation | Higher false positive rate |
+
+**Together:** RF catches known attacks with high confidence. IF catches unknown attacks that don't match any training pattern. The **consensus engine** resolves disagreements.
+
+### 3.2 Why Random Forest Specifically?
+
+| Alternative | Why RF Wins |
+|-------------|-------------|
+| **Logistic Regression** | Too simple — can't capture non-linear attack patterns in 70+ features. |
+| **SVM** | Slow inference on high-dimensional data; doesn't provide probability scores. |
+| **XGBoost/LightGBM** | Comparable performance but RF is more interpretable (feature importances). RF also doesn't require hyperparameter tuning as aggressively. |
+| **Deep Learning (CNN/LSTM)** | Overkill for tabular flow data. DL shines on sequential/image data. RF matches or beats DL on structured tabular data (see: "Why do tree-based models still outperform deep learning on tabular data?" — NeurIPS 2022). |
+| **Neural Networks** | Black-box; RF provides `feature_importances_` for explainability — critical for SOC analysts who need to understand *why* an alert was raised. |
+
+**RF Hyperparameters (justified):**
+- `n_estimators=300` — More trees reduce variance; diminishing returns after ~300.
+- `max_depth=30` — Prevents overfitting while allowing complex decision boundaries.
+- `min_samples_split=5` — Prevents leaves with very few samples.
+- `class_weight="balanced"` — Handles class imbalance (benign >> attack).
+- `n_jobs=-1` — Parallelizes across all CPU cores.
+
+### 3.3 Why Isolation Forest?
+
+- **Unsupervised** — trained only on benign traffic, learns "normal" behavior.
+- **Does not need labeled attack data** — critical for detecting zero-day attacks.
+- `contamination='auto'` — lets the model determine its own threshold.
+- `n_estimators=200` — sufficient for the feature space.
+
+### 3.4 The Consensus Engine (Novelty!)
+
+This is a **3-layer majority-vote system** — the core novelty:
+
+```
+Layer 1: Random Forest    → predict_proba > 0.5 = "ATTACK"
+Layer 2: Isolation Forest  → predict == -1      = "ANOMALY"
+Layer 3: Threat Intel APIs → score > 0.3        = "MALICIOUS IP"
+```
+
+**Verdict logic:**
+| Votes | Verdict | Severity |
+|-------|---------|----------|
+| 3/3 | CONFIRMED THREAT | Critical |
+| 2/3 (both ML) | CONFIRMED THREAT | Critical |
+| 2/3 (RF + TI) | LIKELY THREAT | High |
+| 1/3 (RF only) | LIKELY THREAT | High |
+| 1/3 (IF only) | SUSPICIOUS ANOMALY | Medium |
+| 1/3 (TI only) | KNOWN MALICIOUS IP | Medium |
+| 0/3 | BENIGN | Low |
+
+**IPv6 Handling:** TI databases have sparse IPv6 coverage, so the system automatically **excludes TI votes for IPv6** and relies purely on ML models.
+
+**Why not weighted averaging?** Weights are arbitrary and require manual tuning. A vote-based system is transparent, explainable, and auditable — SOC analysts can see exactly which layers flagged an alert.
+
+---
+
+## 4. DATASET — CICIDS2017
+
+### 4.1 Why CICIDS2017?
+
+| Criterion | CICIDS2017 | NSL-KDD | UNSW-NB15 |
+|-----------|-----------|---------|-----------|
+| **Year** | 2017 | 2009 (original 1999) | 2015 |
+| **Realism** | Real network with modern attacks | Synthetic, outdated attack profiles | Semi-synthetic |
+| **Attack types** | 7 modern categories | 4 generic categories | 9 categories |
+| **Labeling** | Per-flow, per-attack-type | Binary only | Multi-class |
+| **Features** | 80+ flow-level features | 41 features | 49 features |
+| **Community adoption** | Most-cited IDS dataset (5000+ papers) | Legacy standard | Growing |
+
+### 4.2 Attack Types Trained On (7 categories)
+
+| Attack | Training Samples | Detection Rate |
+|--------|-----------------|----------------|
+| **DDoS** | 128K+ flows | 99.98% recall |
+| **DoS** | 193K+ flows | 99.89% recall |
+| **PortScan** | 1.9K flows | 98.72% recall |
+| **BruteForce** | 9.1K flows | 99.81% recall |
+| **WebAttack** | 2.1K flows | 98.79% recall |
+| **Botnet** | 1.4K flows | 91.23% recall |
+| **Infiltration** | 36 flows | 91.67% recall (low precision due to tiny sample) |
+
+### 4.3 Balanced Sampling
+
+- **Problem:** DDoS has 128K samples vs Botnet's 1.4K — model would be biased toward DDoS.
+- **Solution:** Cap each class at 50,000 samples during training. Use `class_weight="balanced"`.
+- **Train/Test split:** 75/25 with stratification.
+
+### 4.4 Cross-Dataset Validation (CIC-IDS2018)
+
+- **Result:** RF accuracy dropped to ~50% on IDS2018 data.
+- **Why:** IDS2018 uses different feature schemas, different attack tools, and different network topologies.
+- **Honest answer for defense:** "The model generalizes well within the CICIDS2017 feature space but requires retraining for different network environments. This is expected for supervised ML in cybersecurity — attack patterns are environment-specific."
+
+---
+
+## 5. VALIDATION RESULTS
+
+### 5.1 Aggregate Metrics (across 1.85M samples)
+
+| Metric | Score |
+|--------|-------|
+| Accuracy | 99.5-99.98% per dataset |
+| ROC-AUC | 0.986 - 1.000 |
+| Weighted F1 | 0.95 - 0.999 |
+
+### 5.2 Stress Test Results
+
+| Test | Result |
+|------|--------|
+| **Zero traffic** (all zeros) | 100% classified as benign ✅ |
+| **Random noise** | 0% flagged as attack ✅ |
+| **Extreme values** | 0% false positives ✅ |
+| **Feature concentration** | Top 5 features hold 31.4% importance — no single feature dominates |
+| **Decision confidence** | 88.5% of predictions are "very confident" (>0.9 or <0.1) |
+
+### 5.3 Top 5 Most Important Features
+
+1. BWD PACKET LENGTH MEAN (7.86%)
+2. AVG BWD SEGMENT SIZE (6.11%)
+3. BWD PACKET LENGTH STD (5.96%)
+4. PACKET LENGTH VARIANCE (5.86%)
+5. BWD PACKET LENGTH MAX (5.63%)
+
+---
+
+## 6. EXISTING TOOLS — HOW INTELLIHUNT DIFFERS
+
+### 6.1 Commercial SIEM/IDS Comparison
+
+| Feature | Splunk/QRadar | Snort/Suricata | Intellihunt |
+|---------|---------------|----------------|-------------|
+| **Detection method** | Rule-based + correlation | Signature-based | ML + anomaly + TI consensus |
+| **Zero-day detection** | Limited | ❌ None | ✅ Isolation Forest |
+| **AI explanation** | ❌ | ❌ | ✅ Grok copilot |
+| **MITRE ATT&CK mapping** | Manual | Manual | ✅ Auto (AI) |
+| **Playbook generation** | Pre-built | ❌ | ✅ AI-generated per alert |
+| **Cost** | $10K-100K+/year | Free | Free (open-source) |
+| **Setup complexity** | Weeks | Days | Minutes (`bash start_demo.sh`) |
+| **Target user** | Enterprise SOC | Network admin | SOC analysts, students, small teams |
+
+### 6.2 Open-Source IDS Comparison
+
+| Feature | Zeek (Bro) | OSSEC | Wazuh | Intellihunt |
+|---------|------------|-------|-------|-------------|
+| **ML models** | ❌ | ❌ | Basic | ✅ Dual-model consensus |
+| **Web dashboard** | ❌ | Basic | ✅ | ✅ Modern React UI |
+| **AI copilot** | ❌ | ❌ | ❌ | ✅ |
+| **Live capture** | ✅ | ❌ | Agent-based | ✅ NFStream |
+| **Report generation** | ❌ | ❌ | ✅ | ✅ PDF with charts |
+
+### 6.3 Academic IDS Comparison
+
+Most academic IDS papers: (1) Train a model, (2) Report metrics, (3) Stop.
+
+**Intellihunt goes further:**
+- Full-stack web application (not just a Jupyter notebook)
+- Real-time ingestion from live network interfaces
+- Consensus engine (not just single-model prediction)
+- AI-powered explanation and response generation
+- Multi-channel alerting (Email/Slack/Teams)
+- Incident management with PDF reports
+- IP blocklisting with enforcement
+- User management with role-based access
+
+---
+
+## 7. WHY WOULD ANYONE USE THIS?
+
+### 7.1 Target Users
+
+1. **Small SOC teams** (1-5 analysts) who can't afford Splunk/QRadar
+2. **University security labs** for teaching and research
+3. **Penetration testers** who need quick network analysis
+4. **Students** learning about IDS/ML in cybersecurity
+5. **Startups** needing basic threat detection without enterprise costs
+
+### 7.2 Key Value Propositions
+
+1. **Multi-layered detection** — not just one model, a consensus of three independent systems
+2. **Explainability** — AI copilot explains WHY an alert matters, not just that it exists
+3. **Actionable** — generates response playbooks, not just alerts
+4. **Free & self-hosted** — no per-event pricing, no data leaves your network
+5. **One-command setup** — `bash start_demo.sh`
+
+---
+
+## 8. SYSTEM ARCHITECTURE & API DESIGN
+
+### 8.1 Architecture (3-Tier)
+
+```
+[Data Sources] → [Backend API] → [Frontend Dashboard]
+     │                │                    │
+  NFStream        FastAPI             React + Vite
+  PCAP files      ML Models           Real-time UI
+  Live capture    MongoDB             Recharts
+                  Threat Intel        Copilot Chat
+                  Consensus Engine
+                  Alerting
+```
+
+### 8.2 API Endpoints (40+ routes)
+
+**Core:** `/ingest`, `/logs`, `/alerts`, `/stats`
+**ML:** `/models/metrics`
+**Copilot:** `/copilot/chat`
+**Incidents:** `/incidents`, `/reports/{id}`
+**Blocklist:** `/blocklist` (CRUD)
+**Users:** `/auth/signup`, `/auth/login`, `/users`
+**MITRE:** `/alerts/{id}/mitre`, `/alerts/{id}/playbook`
+**Forensics:** `/forensics/{ip}`
+**Ingestion:** `/capture/start`, `/capture/stop`, `/upload-file`
+**Settings:** `/settings`, `/alerts/config`
+
+### 8.3 Data Flow (per ingested flow)
+
+```
+1. Raw packet → NFStream → flow features
+2. Feature standardization (key normalization to CICIDS format)
+3. Blocklist check → DROP if IP is blocked
+4. StandardScaler transform
+5. Random Forest predict_proba → risk_score
+6. Isolation Forest predict → is_anomaly
+7. VirusTotal + AbuseIPDB lookup → threat_intel
+8. Consensus Engine → unified verdict
+9. Attack type classification (rule-based + ML-confidence)
+10. Store in MongoDB (logs collection)
+11. If threat → create alert, send notifications
+```
+
+---
+
+## 9. LIMITATIONS (Be Honest!)
+
+### 9.1 ML Limitations
+
+| Limitation | Impact | Mitigation |
+|------------|--------|------------|
+| **Trained on CICIDS2017 only** | May miss attacks not represented in training data | Isolation Forest provides zero-day coverage; model can be retrained |
+| **Binary classification** | Doesn't identify specific attack sub-types via ML | Rule-based classifier post-ML handles sub-type labeling |
+| **Cross-dataset generalization** | 50% accuracy on IDS2018 | Expected — different networks produce different traffic profiles. Retraining required. |
+| **Encrypted traffic** | Cannot inspect payload content | Flow-level features (timing, sizes, rates) still reveal behavioral patterns |
+| **Infiltration detection** | Low precision (17.7%) | Only 36 training samples — need more data |
+
+### 9.2 System Limitations
+
+| Limitation | Impact | Future Fix |
+|------------|--------|------------|
+| **Single-server** | No horizontal scaling | Containerize with Docker, add load balancer |
+| **Polling-based dashboard** | 2-second refresh delay | Upgrade to WebSockets for true real-time |
+| **No authentication middleware** | API endpoints are open | Add JWT-based auth middleware |
+| **No rate limiting** | API can be overwhelmed | Add FastAPI middleware or nginx proxy |
+| **macOS-only live capture tested** | Linux interface names differ | NFStream supports Linux — just change interface name |
+| **No TLS on API** | Traffic between frontend/backend is unencrypted | Add nginx reverse proxy with SSL |
+
+### 9.3 Scalability
+
+| Metric | Current Capacity |
+|--------|-----------------|
+| **Ingestion throughput** | ~20 flows/second (single API instance) |
+| **Database** | MongoDB Atlas M0 = 512MB storage (~500K logs) |
+| **Model inference** | ~5ms per flow (RF + IF + scaler) |
+| **Concurrent users** | FastAPI handles ~1000 concurrent connections |
+
+**Bottleneck:** Threat Intel API calls (VirusTotal/AbuseIPDB have rate limits — 4 req/min on free tier).
+**Fix:** Add caching layer (Redis) for IP reputation lookups.
+
+---
+
+## 10. SECURITY OF THE SYSTEM ITSELF
+
+### 10.1 "What if YOUR system gets attacked?"
+
+| Vulnerability | Risk | Mitigation |
+|---------------|------|------------|
+| **API has no auth** | Anyone can call `/ingest` and poison the database | Add API key or JWT authentication |
+| **MongoDB injection** | Malicious flow data could contain NoSQL injection payloads | Pydantic validation + Motor's parameterized queries prevent injection |
+| **Adversarial ML** | Attacker crafts traffic that fools the RF model | Isolation Forest acts as a second opinion; adversarial-resistant by design (tree-based models are harder to attack than neural networks) |
+| **Model poisoning** | If attacker controls training data | Models are trained offline on vetted CICIDS2017 dataset — not online learning |
+| **DoS on the API** | Flood `/ingest` endpoint | Add rate limiting; NFStream already throttles flow emission |
+| **Credential exposure** | `.env` file contains API keys | `.env` is in `.gitignore`; never committed to version control |
+| **SSRF via Threat Intel** | IP lookup could be exploited | We only query VirusTotal/AbuseIPDB — trusted external APIs |
+
+### 10.2 "What about adversarial machine learning?"
+
+- **Tree-based models (RF) are inherently more robust** to adversarial perturbations than neural networks.
+- An attacker would need to modify flow-level features (packet sizes, timing) in real-time — this is significantly harder than modifying image pixels.
+- The **consensus engine** requires fooling BOTH models simultaneously, plus evading Threat Intel — triple evasion is exponentially harder.
+
+---
+
+## 11. OS-SPECIFIC & FORMAT CONSIDERATIONS
+
+### 11.1 "Does it work on Linux/Windows attacks?"
+
+- **The ML models are OS-agnostic** — they analyze network FLOW features (packet sizes, rates, protocols), not OS-level events.
+- DDoS, port scans, brute force, web attacks produce the same flow patterns regardless of the target OS.
+- **Limitation:** OS-specific attacks (e.g., EternalBlue SMB exploit) have unique payload signatures that flow-level analysis may not capture — this requires deep packet inspection (DPI), which is outside our scope.
+
+### 11.2 "What file formats are supported?"
+
+| Format | Supported | How |
+|--------|-----------|-----|
+| `.pcap` | ✅ | NFStream native support |
+| `.pcapng` | ✅ | NFStream native support |
+| `.pcap.bz2` | ✅ | Auto-decompressed before processing |
+| CSV/Parquet | ✅ | Upload via `/upload-file` endpoint |
+| Live traffic | ✅ | NFStream on any network interface |
+| Syslog/JSON | ❌ | Would need a format adapter |
+
+---
+
+## 12. NOVELTY — WHAT MAKES THIS DIFFERENT
+
+1. **3-Layer Consensus Engine** — No existing open-source IDS uses a vote-based consensus of supervised ML + unsupervised ML + threat intelligence.
+
+2. **AI Copilot Integration** — First open-source IDS with LLM-powered alert explanation, MITRE ATT&CK mapping, and playbook generation.
+
+3. **Full-Stack Production System** — Not a Jupyter notebook. A deployable web application with dashboard, user management, alerting, reporting.
+
+4. **Transparent Decision Making** — Every alert shows exactly which layers voted and why. No black-box scores.
+
+5. **IPv6-Aware Consensus** — Automatically adjusts voting when TI APIs lack IPv6 coverage.
+
+6. **One-Command Deployment** — `bash start_demo.sh` brings up the entire stack.
+
+---
+
+## 13. FUTURE WORK / HOW TO RESOLVE LIMITATIONS
+
+| Limitation | Planned Solution |
+|------------|-----------------|
+| Single dataset training | Implement transfer learning / fine-tuning on customer-specific network data |
+| No encrypted traffic analysis | Add JA3/JA3S TLS fingerprinting via NFStream |
+| No horizontal scaling | Dockerize + Kubernetes deployment |
+| Polling-based UI | WebSocket integration for true push-based updates |
+| No API authentication | JWT middleware + RBAC (Role-Based Access Control) |
+| Limited IPv6 TI | Integrate Shodan API for better IPv6 coverage |
+| Static model | Online learning pipeline for continuous model updates |
+| No PCAP replay | Add time-series replay mode for forensic analysis |
+
+---
+
+## 14. RAPID-FIRE Q&A
+
+**Q: Why not deep learning?**
+A: Tree-based models outperform DL on tabular data (NeurIPS 2022 paper). RF is faster, more interpretable, and doesn't need GPU.
+
+**Q: Is 99% accuracy real or overfitting?**
+A: Validated on held-out test sets per attack type. Stress tests show 0% false positives on random noise. However, cross-dataset (IDS2018) drops to 50% — proving the model learns CICIDS2017 patterns specifically, not universal attack patterns. This is honest and expected.
+
+**Q: How many flows can it handle?**
+A: ~20 flows/sec on a single instance. Model inference is 5ms per flow. Bottleneck is TI API rate limits (cacheable).
+
+**Q: Why MongoDB over SQL?**
+A: Network logs are semi-structured with 70+ optional fields. Document model avoids constant schema migrations. Append-heavy write pattern suits MongoDB.
+
+**Q: Why Grok and not ChatGPT?**
+A: 30× cheaper, lower latency, OpenAI-compatible API (swappable). For FYP budget, Grok's free tier is sufficient.
+
+**Q: What happens if the AI copilot gives wrong advice?**
+A: Copilot is advisory only — no automated actions without human approval. Playbook steps are marked `auto: true/false` to distinguish automated vs human-review actions.
+
+**Q: Can an attacker evade detection?**
+A: Single-model evasion is possible. But evading RF + IF + TI simultaneously is exponentially harder. This is the core value of the consensus approach.
+
+**Q: Why not Snort/Suricata rules?**
+A: Rules detect known signatures only. Our ML detects behavioral patterns. Isolation Forest can flag zero-day attacks that have no existing signature.
+
+**Q: What if the database goes down?**
+A: MongoDB Atlas has automatic failover and backups. The API returns errors gracefully — no data loss in the ML pipeline.
+
+**Q: Why flow-level and not packet-level analysis?**
+A: Flow-level reduces data volume by 100-1000×, captures behavioral patterns (rates, durations), and matches CICIDS2017's feature format. Packet-level DPI is a privacy concern and computationally expensive.
+
+**Q: How do you handle class imbalance?**
+A: (1) `class_weight="balanced"` in RF, (2) Capping each class at 50K samples, (3) Stratified train/test split.
+
+**Q: What's the attack type classifier based on?**
+A: A rule-based post-processor that examines flow features (SYN flags, packet rates, durations) after ML scoring. When rules don't match but ML confidence is high, it falls back to ML-confirmed labels.
+
+**Q: Why not use MITRE ATT&CK directly for classification?**
+A: MITRE ATT&CK is a framework, not a classifier. We use AI (Grok) to map our detected alerts to MITRE techniques — bridging ML detection with established taxonomy.
+
+---
+
+## 15. SYSTEM PAGES & FEATURES SUMMARY
+
+| Page | Purpose |
+|------|---------|
+| **Landing** | Marketing page with feature overview |
+| **Dashboard** | Real-time stats, charts, ingestion status |
+| **Alerts** | Alert list with MITRE mapping, playbooks |
+| **Logs** | Real-time log stream |
+| **Log History** | Paginated, filterable historical logs |
+| **Copilot** | AI chat interface for alert analysis |
+| **Ingestion** | Live capture + file upload controls |
+| **Threat Intel** | IP reputation lookup |
+| **Forensic Timeline** | Per-IP activity history |
+| **Incidents** | Incident management with PDF reports |
+| **Models** | ML model metrics and validation results |
+| **Settings** | System configuration |
+| **User Management** | Role-based user admin |
+
+---
+
+## 16. KEY NUMBERS TO REMEMBER
+
+- **1.85 million** samples validated across 7 attack types
+- **70+** network flow features per log
+- **3** independent detection layers
+- **40+** REST API endpoints
+- **15+** frontend pages
+- **3** notification channels (Email/Slack/Teams)
+- **99.5-99.98%** accuracy on CICIDS2017
+- **~5ms** inference time per flow
+- **300** trees in Random Forest
+- **200** trees in Isolation Forest

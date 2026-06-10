@@ -1,0 +1,14 @@
+filebeat.inputs:
+  - type: log
+    enabled: true
+    paths:
+      - /Users/sania/Desktop/Fyp/logs/*.json
+    json.keys_under_root: true
+    json.add_error_key: true
+
+# Use HTTP output to send data to FastAPI
+output.http:
+  enabled: true
+  url: "http://localhost:8000/ingest"
+  max_retries: 3
+  retry_backoff: 1s

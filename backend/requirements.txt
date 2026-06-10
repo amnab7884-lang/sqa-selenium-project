@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+pandas
+scikit-learn
+joblib
+motor
+pymongo
+pyarrow
+fastparquet
+python-multipart
+python-dotenv
+httpx
+fpdf2
